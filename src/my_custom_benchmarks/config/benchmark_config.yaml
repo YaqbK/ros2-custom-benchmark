@@ -1,0 +1,17 @@
+custom_benchmark_node:
+  ros__parameters:
+    # This MUST be at the root, outside of benchmark_config!
+    warehouse_plugin: "warehouse_ros_sqlite::DatabaseConnection"
+
+    ompl:
+      planning_plugin: "ompl_interface/OMPLPlanner"
+
+    benchmark_config:
+      parameters:
+        name: "ur5e_planner_comparison"
+        runs: 10
+        group: "ur_manipulator"
+        timeout: 5.0
+        output_directory: "/tmp/benchmark_results/"
+      planning_pipelines:
+        pipelines: ["ompl"]
