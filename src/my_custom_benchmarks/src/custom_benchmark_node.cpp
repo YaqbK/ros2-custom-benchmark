@@ -5,13 +5,14 @@
 #include <moveit/kinematic_constraints/utils.h>
 #include <moveit/robot_model_loader/robot_model_loader.h>
 #include <moveit/planning_pipeline/planning_pipeline.h>
+#include <yaml-cpp/yaml.h>
+#include <fstream>
 
 class CustomBenchmarkOptions : public moveit_ros_benchmarks::BenchmarkOptions
 {
 public:
   CustomBenchmarkOptions(const rclcpp::Node::SharedPtr& node) : BenchmarkOptions(node)
   {
-    // Inheritance gives us VIP access to the protected variable!
     this->planning_pipelines_["ompl"] = {
       "RRTConnectkConfigDefault", 
       "PRMkConfigDefault", 
@@ -22,53 +23,30 @@ public:
 
 class CustomBenchmarkExecutor : public moveit_ros_benchmarks::BenchmarkExecutor
 {
+private:
+  // NASZA SKRYTKA: Tu bezpiecznie schowamy zapytania z pliku YAML
+  std::vector<BenchmarkRequest> preloaded_queries_;
+
 protected:
   bool loadBenchmarkQueryData(
-      const moveit_ros_benchmarks::BenchmarkOptions& options,
-      moveit_msgs::msg::PlanningScene& scene_msg,
-      std::vector<StartState>& start_states,
-      std::vector<PathConstraints>& path_constraints,
-      std::vector<PathConstraints>& goal_constraints,
-      std::vector<TrajectoryConstraints>& traj_constraints,
+      const moveit_ros_benchmarks::BenchmarkOptions& /*options*/,
+      moveit_msgs::msg::PlanningScene& /*scene_msg*/,
+      std::vector<StartState>& /*start_states*/,
+      std::vector<PathConstraints>& /*path_constraints*/,
+      std::vector<PathConstraints>& /*goal_constraints*/,
+      std::vector<TrajectoryConstraints>& /*traj_constraints*/,
       std::vector<BenchmarkRequest>& queries) override
   {
-    // 1. Create a new benchmark request container using the local struct
-    BenchmarkRequest req;
-    req.name = "ur5e_custom_query";
-    
-    // 2. Set the core parameters
-    req.request.group_name = "ur_manipulator";
-    req.request.allowed_planning_time = 5.0;
-    req.request.num_planning_attempts = 10;
-    
-    // 3. Set Start State (make sure scene_msg in the parameters above is not commented out!)
-    req.request.start_state = scene_msg.robot_state;
-    
-    // 4. Set Goal State: Move the shoulder pan joint to ~90 degrees (1.57 radians)
-    moveit_msgs::msg::Constraints goal_constraint;
-    moveit_msgs::msg::JointConstraint joint_constraint;
-    joint_constraint.joint_name = "shoulder_pan_joint";
-    joint_constraint.position = 1.57; 
-    joint_constraint.tolerance_above = 0.01;
-    joint_constraint.tolerance_below = 0.01;
-    joint_constraint.weight = 1.0;
-    
-    goal_constraint.joint_constraints.push_back(joint_constraint);
-    req.request.goal_constraints.push_back(goal_constraint);
-    
-    // 5. Push our custom request into MoveIt's query queue (the 7th parameter)
-    queries.push_back(req);
-    
+    // KLUCZOWY MOMENT: MoveIt przed chwilą zrobił queries.clear(), więc my je z powrotem ładujemy ze skrytki!
+    queries = preloaded_queries_;
     return true; 
   }
 
 public:
   CustomBenchmarkExecutor(const rclcpp::Node::SharedPtr& node) : BenchmarkExecutor(node) {}
 
-  // This function is INSIDE the class, so it CAN access protected BenchmarkRequest and initializeBenchmarks
   void runCustomBenchmark(const rclcpp::Node::SharedPtr& node)
   {
-    // 1. Load Robot Model
     robot_model_loader::RobotModelLoader robot_model_loader(node, "robot_description");
     auto robot_model = robot_model_loader.getModel();
     if (!robot_model) {
@@ -76,64 +54,114 @@ public:
       return;
     }
 
-    // 2. Setup Options
+    // --- WSTRZYKNIĘCIE PARAMETRÓW REGEX Z ".parameters." ---
+    auto set_str_param = [&](const std::string& name, const std::string& val) {
+      if (!node->has_parameter(name)) node->declare_parameter(name, val);
+      else node->set_parameter(rclcpp::Parameter(name, val));
+    };
+    
+    // Wymuszamy parametry dokładnie tak, jak szuka ich parser
+    set_str_param("benchmark_config.parameters.query_regex", ".*");
+    set_str_param("benchmark_config.parameters.start_state_regex", ".*");
+    set_str_param("benchmark_config.parameters.goal_constraint_regex", ".*");
+    set_str_param("benchmark_config.parameters.path_constraint_regex", ".*");
+    set_str_param("benchmark_config.parameters.trajectory_constraint_regex", ".*");
+
+    if (!node->has_parameter("benchmark_config.planning_pipelines.pipelines")) {
+      node->declare_parameter("benchmark_config.planning_pipelines.pipelines", std::vector<std::string>{"ompl"});
+    } else {
+      node->set_parameter(rclcpp::Parameter("benchmark_config.planning_pipelines.pipelines", std::vector<std::string>{"ompl"}));
+    }
+    // -------------------------------------------------------
+
     CustomBenchmarkOptions options(node);
 
-    // BYPASS THE EXECUTOR BUG: Manually build the pipeline and inject it!
     auto pipeline = std::make_shared<planning_pipeline::PlanningPipeline>(robot_model, node, "ompl");
     this->planning_pipelines_["ompl"] = pipeline;
 
-    // 3. Create Planning Scene
     planning_scene::PlanningScene scene(robot_model);
-    moveit_msgs::msg::CollisionObject box;
-    box.id = "test_obstacle";
-    box.header.frame_id = robot_model->getModelFrame();
-    shape_msgs::msg::SolidPrimitive primitive;
-    primitive.type = primitive.BOX;
-    primitive.dimensions = {0.2, 0.8, 0.5}; 
     
-    geometry_msgs::msg::Pose box_pose;
-    box_pose.position.x = 0.5; 
-    box_pose.position.y = 0.0;
-    box_pose.position.z = 0.25;
-    box_pose.orientation.w = 1.0;
-    
-    box.primitives.push_back(primitive);
-    box.primitive_poses.push_back(box_pose);
-    box.operation = box.ADD;
-    scene.processCollisionObjectMsg(box);
+    YAML::Node config;
+    try {
+      config = YAML::LoadFile("benchmark_queries.yaml");
+      RCLCPP_INFO(node->get_logger(), "Successfully loaded benchmark_queries.yaml");
+    } catch (const YAML::BadFile& e) {
+      RCLCPP_ERROR(node->get_logger(), "Failed to load benchmark_queries.yaml!");
+      return;
+    }
+
+    if (config["obstacles"]) {
+      for (const auto& obs_node : config["obstacles"]) {
+        moveit_msgs::msg::CollisionObject box;
+        box.id = obs_node["id"].as<std::string>();
+        box.header.frame_id = robot_model->getModelFrame();
+        
+        shape_msgs::msg::SolidPrimitive primitive;
+        primitive.type = primitive.BOX;
+        auto dims = obs_node["dimensions"].as<std::vector<double>>();
+        primitive.dimensions = {dims[0], dims[1], dims[2]};
+        
+        geometry_msgs::msg::Pose box_pose;
+        auto pos = obs_node["position"].as<std::vector<double>>();
+        box_pose.position.x = pos[0];
+        box_pose.position.y = pos[1];
+        box_pose.position.z = pos[2];
+        box_pose.orientation.w = 1.0;
+        
+        box.primitives.push_back(primitive);
+        box.primitive_poses.push_back(box_pose);
+        box.operation = box.ADD;
+        scene.processCollisionObjectMsg(box);
+      }
+      RCLCPP_INFO(node->get_logger(), "Loaded %ld obstacles.", config["obstacles"].size());
+    }
 
     moveit_msgs::msg::PlanningScene scene_msg;
     scene.getPlanningSceneMsg(scene_msg);
 
-    // 4. Setup Queries using the PROTECTED BenchmarkRequest struct
-    std::vector<BenchmarkRequest> queries;
-    
-    moveit::core::RobotState start_state(robot_model);
+    // Czyszczenie naszej skrytki
+    preloaded_queries_.clear(); 
     const moveit::core::JointModelGroup* jmg = robot_model->getJointModelGroup("ur_manipulator");
-    
-    std::vector<double> start_joints = {0.0, -1.57, 1.57, -1.57, -1.57, 0.0};
-    start_state.setJointGroupPositions(jmg, start_joints);
-    
-    moveit::core::RobotState goal_state(start_state);
-    std::vector<double> goal_joints = {1.57, -1.57, 1.57, -1.57, -1.57, 0.0};
-    goal_state.setJointGroupPositions(jmg, goal_joints);
 
-    moveit_msgs::msg::MotionPlanRequest request;
-    request.group_name = "ur_manipulator";
-    request.num_planning_attempts = 10;
-    request.allowed_planning_time = 5.0;
-    moveit::core::robotStateToRobotStateMsg(start_state, request.start_state);
-    request.goal_constraints.push_back(kinematic_constraints::constructGoalConstraints(goal_state, jmg));
+    if (config["queries"]) {
+      for (const auto& query_item : config["queries"]) {
+        for (auto it = query_item.begin(); it != query_item.end(); ++it) {
+          std::string q_name = it->first.as<std::string>();
+          YAML::Node q_data = it->second;
 
-    // Fill the protected struct
-    BenchmarkRequest benchmark_query;
-    benchmark_query.name = "ur5e_obstacle_avoidance";
-    benchmark_query.request = request;
-    queries.push_back(benchmark_query);
+          auto start_joints = q_data["start"].as<std::vector<double>>();
+          auto goal_joints = q_data["goal"].as<std::vector<double>>();
 
-    // 5. Run using the PROTECTED methods
-    if (this->initializeBenchmarks(options, scene_msg, queries))
+          moveit::core::RobotState start_state(robot_model);
+          start_state.setJointGroupPositions(jmg, start_joints);
+          start_state.update();
+
+          moveit::core::RobotState goal_state(robot_model);
+          goal_state.setJointGroupPositions(jmg, goal_joints);
+          goal_state.update();
+
+          moveit_msgs::msg::MotionPlanRequest request;
+          request.group_name = "ur_manipulator";
+          request.num_planning_attempts = 10;
+          request.allowed_planning_time = 5.0;
+          
+          moveit::core::robotStateToRobotStateMsg(start_state, request.start_state);
+          request.goal_constraints.push_back(kinematic_constraints::constructGoalConstraints(goal_state, jmg));
+
+          BenchmarkRequest benchmark_query;
+          benchmark_query.name = q_name;
+          benchmark_query.request = request;
+          
+          // ŁADUJEMY ZAPYTANIE DO NASZEJ BEZPIECZNEJ SKRYTKI
+          preloaded_queries_.push_back(benchmark_query);
+        }
+      }
+      RCLCPP_INFO(node->get_logger(), "Loaded %ld queries to preloaded cache.", preloaded_queries_.size());
+    }
+
+    // Pusty wektor (i tak zostanie wewnętrznie wyczyszczony przez MoveIt i zastąpiony naszą funkcją)
+    std::vector<BenchmarkRequest> dummy_queries;
+    if (this->initializeBenchmarks(options, scene_msg, dummy_queries))
     {
       this->runBenchmarks(options);
     }
@@ -143,12 +171,10 @@ public:
 int main(int argc, char** argv)
 {
   rclcpp::init(argc, argv);
-  
   rclcpp::NodeOptions node_options;
   node_options.automatically_declare_parameters_from_overrides(true);
   auto node = rclcpp::Node::make_shared("custom_benchmark_node", node_options);
 
-  // Simply create the object and call our "unlocked" method
   CustomBenchmarkExecutor executor(node);
   executor.runCustomBenchmark(node);
 

@@ -12,6 +12,7 @@ find_package(moveit_ros_benchmarks REQUIRED)
 find_package(moveit_core REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED)
 find_package(moveit_ros_planning REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 add_executable(custom_benchmark_node src/custom_benchmark_node.cpp)
 
@@ -22,6 +23,8 @@ ament_target_dependencies(custom_benchmark_node
   moveit_ros_planning_interface
   moveit_ros_planning
 )
+
+target_link_libraries(custom_benchmark_node yaml-cpp)
 
 install(TARGETS custom_benchmark_node
   DESTINATION lib/${PROJECT_NAME}

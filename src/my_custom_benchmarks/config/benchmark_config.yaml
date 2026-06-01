@@ -1,17 +1,52 @@
+# custom_benchmark_node:
+#   ros__parameters:
+#     # This MUST be at the root, outside of benchmark_config!
+#     warehouse_plugin: "warehouse_ros_sqlite::DatabaseConnection"
+
+#     ompl:
+#       planning_plugin: "ompl_interface/OMPLPlanner"
+
+#     benchmark_config:
+#       parameters:
+#         name: "ur5e_planner_comparison"
+#         runs: 10
+#         group: "ur_manipulator"
+#         timeout: 5.0
+#         output_directory: "/home/jakub/Ros/custom_benchmark_ws/results/"
+        
+#         # Dokładne nazwy parametrów, których żąda MoveIt:
+#         query_regex: ".*"
+#         start_state_regex: ".*"
+#         goal_constraint_regex: ".*"
+#         path_constraint_regex: ".*"
+#         trajectory_constraint_regex: ".*"
+        
+#         planning_pipelines:
+#           pipelines: ["ompl"]
+
 custom_benchmark_node:
   ros__parameters:
-    # This MUST be at the root, outside of benchmark_config!
+    # Wymuszenie OMPL zamiast CHOMP
     warehouse_plugin: "warehouse_ros_sqlite::DatabaseConnection"
-
     ompl:
       planning_plugin: "ompl_interface/OMPLPlanner"
-
+      
     benchmark_config:
       parameters:
         name: "ur5e_planner_comparison"
         runs: 10
         group: "ur_manipulator"
         timeout: 5.0
-        output_directory: "/tmp/benchmark_results/"
-      planning_pipelines:
-        pipelines: ["ompl"]
+        output_directory: "/home/jakub/Ros/custom_benchmark_ws/results/"
+        
+        # Filtry przepuszczające (oba warianty dla świętego spokoju)
+        queries_regex: ".*"
+        query_regex: ".*"
+        start_states_regex: ".*"
+        start_state_regex: ".*"
+        goal_constraints_regex: ".*"
+        goal_constraint_regex: ".*"
+        path_constraints_regex: ".*"
+        path_constraint_regex: ".*"
+        trajectory_constraints_regex: ".*"
+        trajectory_constraint_regex: ".*"
