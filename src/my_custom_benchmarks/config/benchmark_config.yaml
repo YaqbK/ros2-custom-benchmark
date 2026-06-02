@@ -34,12 +34,12 @@ custom_benchmark_node:
     benchmark_config:
       parameters:
         name: "ur5e_planner_comparison"
-        runs: 10
+        runs: 5
         group: "ur_manipulator"
-        timeout: 5.0
+        timeout: 10.0
         output_directory: "/home/jakub/Ros/custom_benchmark_ws/results/"
         
-        # Filtry przepuszczające (oba warianty dla świętego spokoju)
+        # Filtry przepuszczające (oba warianty bo sie bugowalo czasem)
         queries_regex: ".*"
         query_regex: ".*"
         start_states_regex: ".*"

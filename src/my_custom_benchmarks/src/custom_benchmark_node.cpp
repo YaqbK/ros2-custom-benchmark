@@ -11,6 +11,7 @@
 class CustomBenchmarkOptions : public moveit_ros_benchmarks::BenchmarkOptions
 {
 public:
+  // tutaj dodajemy planery które chcemy przetestować
   CustomBenchmarkOptions(const rclcpp::Node::SharedPtr& node) : BenchmarkOptions(node)
   {
     this->planning_pipelines_["ompl"] = {
@@ -92,28 +93,37 @@ public:
 
     if (config["obstacles"]) {
       for (const auto& obs_node : config["obstacles"]) {
-        moveit_msgs::msg::CollisionObject box;
-        box.id = obs_node["id"].as<std::string>();
-        box.header.frame_id = robot_model->getModelFrame();
+        moveit_msgs::msg::CollisionObject obj;
+        obj.id = obs_node["id"].as<std::string>();
+        obj.header.frame_id = robot_model->getModelFrame();
         
         shape_msgs::msg::SolidPrimitive primitive;
-        primitive.type = primitive.BOX;
+        std::string type_str = obs_node["type"] ? obs_node["type"].as<std::string>() : "BOX";
+        
+        if (type_str == "BOX") primitive.type = primitive.BOX;
+        else if (type_str == "CYLINDER") primitive.type = primitive.CYLINDER;
+        else if (type_str == "SPHERE") primitive.type = primitive.SPHERE;
+        
+        // Zabezpieczenie przed błędem zapytań (przypisujemy wektor dynamicznie)
         auto dims = obs_node["dimensions"].as<std::vector<double>>();
-        primitive.dimensions = {dims[0], dims[1], dims[2]};
+        primitive.dimensions.resize(dims.size());
+        for (size_t k = 0; k < dims.size(); ++k) {
+            primitive.dimensions[k] = dims[k];
+        }
         
-        geometry_msgs::msg::Pose box_pose;
+        geometry_msgs::msg::Pose pose;
         auto pos = obs_node["position"].as<std::vector<double>>();
-        box_pose.position.x = pos[0];
-        box_pose.position.y = pos[1];
-        box_pose.position.z = pos[2];
-        box_pose.orientation.w = 1.0;
+        pose.position.x = pos[0];
+        pose.position.y = pos[1];
+        pose.position.z = pos[2];
+        pose.orientation.w = 1.0;
         
-        box.primitives.push_back(primitive);
-        box.primitive_poses.push_back(box_pose);
-        box.operation = box.ADD;
-        scene.processCollisionObjectMsg(box);
+        obj.primitives.push_back(primitive);
+        obj.primitive_poses.push_back(pose);
+        obj.operation = obj.ADD;
+        scene.processCollisionObjectMsg(obj);
       }
-      RCLCPP_INFO(node->get_logger(), "Loaded %ld obstacles.", config["obstacles"].size());
+      RCLCPP_INFO(node->get_logger(), "Loaded %ld multi-type obstacles.", config["obstacles"].size());
     }
 
     moveit_msgs::msg::PlanningScene scene_msg;
@@ -122,6 +132,9 @@ public:
     // Czyszczenie naszej skrytki
     preloaded_queries_.clear(); 
     const moveit::core::JointModelGroup* jmg = robot_model->getJointModelGroup("ur_manipulator");
+
+    double yaml_timeout = 5.0;
+    node->get_parameter_or("benchmark_config.parameters.timeout", yaml_timeout, 5.0);
 
     if (config["queries"]) {
       for (const auto& query_item : config["queries"]) {
@@ -143,7 +156,7 @@ public:
           moveit_msgs::msg::MotionPlanRequest request;
           request.group_name = "ur_manipulator";
           request.num_planning_attempts = 10;
-          request.allowed_planning_time = 5.0;
+          request.allowed_planning_time = yaml_timeout;
           
           moveit::core::robotStateToRobotStateMsg(start_state, request.start_state);
           request.goal_constraints.push_back(kinematic_constraints::constructGoalConstraints(goal_state, jmg));

@@ -9,6 +9,11 @@
 #include <cstdlib>
 #include <ctime>
 
+// Pomocnicza funkcja do losowania wartości z zakresu
+double randomDouble(double min, double max) {
+    return min + (max - min) * ((double)std::rand() / RAND_MAX);
+}
+
 int main(int argc, char** argv)
 {
   rclcpp::init(argc, argv);
@@ -21,50 +26,74 @@ int main(int argc, char** argv)
   planning_scene::PlanningScene planning_scene(kinematic_model);
 
   std::srand(std::time(nullptr));
-  int num_obstacles = 4;
-  RCLCPP_INFO(node->get_logger(), "Adding %d random obstacles to the scene...", num_obstacles);
 
-  // Wektor przechowujący wygenerowane przeszkody do późniejszego zapisu
+  // =====================================================================
+  // --- KONFIGURACJA PARAMETRÓW SCENY ---
+  // =====================================================================
+  int min_obstacles = 2;
+  int max_obstacles = 5;
+  int target_dataset_size = 10;
+
+  // Przestrzeń robocza (obszar losowania przeszkód dookoła robota)
+  double ws_x_min = 0.2,  ws_x_max = 0.9;
+  double ws_y_min = -0.8, ws_y_max = 0.9;
+  double ws_z_min = 0.1,  ws_z_max = 0.9;
+
+  // Rozmiary brył (min i max dla promieni, wysokości i krawędzi)
+  double size_min = 0.05, size_max = 0.25;
+  // =====================================================================
+
+  int num_obstacles = min_obstacles + (std::rand() % (max_obstacles - min_obstacles + 1));
+  RCLCPP_INFO(node->get_logger(), "Generating %d random obstacles...", num_obstacles);
+
   std::vector<moveit_msgs::msg::CollisionObject> generated_obstacles;
 
   for (int i = 0; i < num_obstacles; ++i) {
     moveit_msgs::msg::CollisionObject collision_object;
     collision_object.header.frame_id = "base_link";
-    collision_object.id = "box_" + std::to_string(i);
+    collision_object.id = "obs_" + std::to_string(i);
 
-    shape_msgs::msg::SolidPrimitive box;
-    box.type = shape_msgs::msg::SolidPrimitive::BOX;
-    box.dimensions = {
-      0.1 + (std::rand() % 20) / 100.0,
-      0.1 + (std::rand() % 20) / 100.0,
-      0.1 + (std::rand() % 40) / 100.0
-    };
+    shape_msgs::msg::SolidPrimitive primitive;
+    int shape_type = std::rand() % 3; // 0: BOX, 1: CYLINDER, 2: SPHERE
 
-    geometry_msgs::msg::Pose box_pose;
-    box_pose.position.x = 0.3 + (std::rand() % 50) / 100.0;
-    box_pose.position.y = -0.5 + (std::rand() % 100) / 100.0;
-    box_pose.position.z = 0.1 + (std::rand() % 50) / 100.0;
-    box_pose.orientation.w = 1.0;
+    if (shape_type == 0) {
+        primitive.type = shape_msgs::msg::SolidPrimitive::BOX;
+        primitive.dimensions = {randomDouble(size_min, size_max), randomDouble(size_min, size_max), randomDouble(size_min, size_max)};
+    } else if (shape_type == 1) {
+        primitive.type = shape_msgs::msg::SolidPrimitive::CYLINDER;
+        primitive.dimensions = {randomDouble(size_min, size_max * 1.5), randomDouble(size_min, size_max / 2)}; // HEIGHT, RADIUS
+    } else {
+        primitive.type = shape_msgs::msg::SolidPrimitive::SPHERE;
+        primitive.dimensions = {randomDouble(size_min, size_max / 1.5)}; // RADIUS
+    }
 
-    collision_object.primitives.push_back(box);
-    collision_object.primitive_poses.push_back(box_pose);
+    geometry_msgs::msg::Pose pose;
+    pose.position.x = randomDouble(ws_x_min, ws_x_max);
+    pose.position.y = randomDouble(ws_y_min, ws_y_max);
+    pose.position.z = randomDouble(ws_z_min, ws_z_max);
+    pose.orientation.w = 1.0;
+
+    collision_object.primitives.push_back(primitive);
+    collision_object.primitive_poses.push_back(pose);
     collision_object.operation = collision_object.ADD;
 
     planning_scene.processCollisionObjectMsg(collision_object);
-    generated_obstacles.push_back(collision_object); // Zapisujemy przeszkodę w pamięci
+    generated_obstacles.push_back(collision_object); 
   }
 
   moveit::core::RobotState& current_state = planning_scene.getCurrentStateNonConst();
   const moveit::core::JointModelGroup* joint_model_group = current_state.getJointModelGroup("ur_manipulator");
 
-  collision_detection::CollisionRequest collision_request;
+  collision_detection::CollisionRequest collision_request;  
   collision_detection::CollisionResult collision_result;
 
   int valid_states_found = 0;
-  int target_dataset_size = 10; 
   std::vector<std::vector<double>> dataset;
 
-  RCLCPP_INFO(node->get_logger(), "Starting random state generation...");
+  // MARGINES BEZPIECZEŃSTWA (np. 2.5 centymetra), do dodania ewentualnie, sprawiało problemy bo jointy ramienia się stykają i wywala
+  // double safety_margin = 0.025; 
+
+  // RCLCPP_INFO(node->get_logger(), "Starting strict collision-free state generation with %f m padding...", safety_margin);
 
   while (valid_states_found < target_dataset_size * 2)
   {
@@ -72,7 +101,7 @@ int main(int argc, char** argv)
     current_state.setToRandomPositions(joint_model_group);
     current_state.update();
     
-    planning_scene.checkSelfCollision(collision_request, collision_result, current_state);
+    planning_scene.checkCollision(collision_request, collision_result, current_state);
 
     if (!collision_result.collision)
     {
@@ -80,22 +109,30 @@ int main(int argc, char** argv)
       current_state.copyJointGroupPositions(joint_model_group, joint_values);
       dataset.push_back(joint_values);
       
-      RCLCPP_INFO(node->get_logger(), "Valid state found! (%d)", valid_states_found + 1);
+      RCLCPP_INFO(node->get_logger(), "Valid state found! (%d / %d)", valid_states_found + 1, target_dataset_size * 2);
       valid_states_found++;
     }
   }
 
-  // Zapis do pliku YAML - rozszerzony o sekcję obstacles
+  // Zapis do pliku YAML
   std::ofstream file("benchmark_queries.yaml");
-  
   file << "obstacles:\n";
   for (const auto& obs : generated_obstacles) {
+    std::string type_str;
+    switch(obs.primitives[0].type) {
+        case shape_msgs::msg::SolidPrimitive::BOX: type_str = "BOX"; break;
+        case shape_msgs::msg::SolidPrimitive::CYLINDER: type_str = "CYLINDER"; break;
+        case shape_msgs::msg::SolidPrimitive::SPHERE: type_str = "SPHERE"; break;
+    }
+    
     file << "  - id: " << obs.id << "\n";
-    file << "    dimensions: [" 
-         << obs.primitives[0].dimensions[0] << ", "
-         << obs.primitives[0].dimensions[1] << ", "
-         << obs.primitives[0].dimensions[2] << "]\n";
-    file << "    position: [" 
+    file << "    type: " << type_str << "\n";
+    file << "    dimensions: [";
+    for (size_t k = 0; k < obs.primitives[0].dimensions.size(); ++k) {
+        file << obs.primitives[0].dimensions[k];
+        if (k < obs.primitives[0].dimensions.size() - 1) file << ", ";
+    }
+    file << "]\n    position: [" 
          << obs.primitive_poses[0].position.x << ", "
          << obs.primitive_poses[0].position.y << ", "
          << obs.primitive_poses[0].position.z << "]\n";
@@ -112,7 +149,7 @@ int main(int argc, char** argv)
   }
   file.close();
 
-  RCLCPP_INFO(node->get_logger(), "Saved dataset with obstacles to benchmark_queries.yaml");
+  RCLCPP_INFO(node->get_logger(), "Saved advanced dataset to benchmark_queries.yaml");
   rclcpp::shutdown();
   return 0;
 }
