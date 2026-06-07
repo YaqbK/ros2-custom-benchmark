@@ -1,35 +1,41 @@
 # custom_benchmark_node:
 #   ros__parameters:
-#     # This MUST be at the root, outside of benchmark_config!
+#     # Wymuszenie OMPL zamiast CHOMP
 #     warehouse_plugin: "warehouse_ros_sqlite::DatabaseConnection"
-
 #     ompl:
 #       planning_plugin: "ompl_interface/OMPLPlanner"
-
+      
 #     benchmark_config:
 #       parameters:
 #         name: "ur5e_planner_comparison"
-#         runs: 10
+#         runs: 5
 #         group: "ur_manipulator"
-#         timeout: 5.0
+#         timeout: 10.0
 #         output_directory: "/home/jakub/Ros/custom_benchmark_ws/results/"
         
-#         # Dokładne nazwy parametrów, których żąda MoveIt:
+#         # Filtry przepuszczające (oba warianty bo sie bugowalo czasem)
+#         queries_regex: ".*"
 #         query_regex: ".*"
+#         start_states_regex: ".*"
 #         start_state_regex: ".*"
+#         goal_constraints_regex: ".*"
 #         goal_constraint_regex: ".*"
+#         path_constraints_regex: ".*"
 #         path_constraint_regex: ".*"
+#         trajectory_constraints_regex: ".*"
 #         trajectory_constraint_regex: ".*"
-        
-#         planning_pipelines:
-#           pipelines: ["ompl"]
+
 
 custom_benchmark_node:
   ros__parameters:
-    # Wymuszenie OMPL zamiast CHOMP
     warehouse_plugin: "warehouse_ros_sqlite::DatabaseConnection"
+    
     ompl:
       planning_plugin: "ompl_interface/OMPLPlanner"
+    chomp:
+      planning_plugin: "chomp_interface/CHOMPPlanner"
+    stomp:
+      planning_plugin: "stomp_interface/StompPlanner"
       
     benchmark_config:
       parameters:
@@ -39,7 +45,16 @@ custom_benchmark_node:
         timeout: 10.0
         output_directory: "/home/jakub/Ros/custom_benchmark_ws/results/"
         
-        # Filtry przepuszczające (oba warianty bo sie bugowalo czasem)
+        planners:
+          - plugin: ompl
+            planners:
+              - RRTConnectkConfigDefault
+              - PRMkConfigDefault
+          - plugin: chomp
+            planners:
+              - CHOMP
+
+        # Filtry przepuszczające
         queries_regex: ".*"
         query_regex: ".*"
         start_states_regex: ".*"

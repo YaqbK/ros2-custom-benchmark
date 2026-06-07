@@ -11,6 +11,7 @@ find_package(rclcpp REQUIRED)
 find_package(moveit_core REQUIRED)
 find_package(moveit_ros_planning REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -27,11 +28,20 @@ endif()
 add_executable(dataset_generator src/dataset_generator.cpp)
 ament_target_dependencies(dataset_generator rclcpp moveit_core moveit_ros_planning moveit_ros_planning_interface)
 
+add_executable(dataset_visualizer src/dataset_visualizer.cpp)
+ament_target_dependencies(dataset_visualizer rclcpp moveit_core moveit_ros_planning moveit_ros_planning_interface)
+target_link_libraries(dataset_visualizer yaml-cpp)
+
 install(TARGETS
   dataset_generator
+  dataset_visualizer
   DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(DIRECTORY launch rviz
   DESTINATION share/${PROJECT_NAME}
 )
 

@@ -19,6 +19,7 @@ public:
       "PRMkConfigDefault", 
       "RRTstarkConfigDefault"
     };
+    this->planning_pipelines_["chomp"] = {"CHOMP"};
   }
 };
 
@@ -77,8 +78,12 @@ public:
 
     CustomBenchmarkOptions options(node);
 
-    auto pipeline = std::make_shared<planning_pipeline::PlanningPipeline>(robot_model, node, "ompl");
-    this->planning_pipelines_["ompl"] = pipeline;
+    // Ładowanie wszystkich trzech potoków planistycznych
+    auto ompl_pipeline = std::make_shared<planning_pipeline::PlanningPipeline>(robot_model, node, "ompl");
+    this->planning_pipelines_["ompl"] = ompl_pipeline;
+
+    auto chomp_pipeline = std::make_shared<planning_pipeline::PlanningPipeline>(robot_model, node, "chomp");
+    this->planning_pipelines_["chomp"] = chomp_pipeline;
 
     planning_scene::PlanningScene scene(robot_model);
     
@@ -133,8 +138,8 @@ public:
     preloaded_queries_.clear(); 
     const moveit::core::JointModelGroup* jmg = robot_model->getJointModelGroup("ur_manipulator");
 
-    double yaml_timeout = 5.0;
-    node->get_parameter_or("benchmark_config.parameters.timeout", yaml_timeout, 5.0);
+    double yaml_timeout = 10.0;
+    node->get_parameter_or("benchmark_config.parameters.timeout", yaml_timeout, 10.0);
 
     if (config["queries"]) {
       for (const auto& query_item : config["queries"]) {

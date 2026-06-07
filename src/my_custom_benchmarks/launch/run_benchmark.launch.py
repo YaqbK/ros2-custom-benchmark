@@ -57,7 +57,7 @@ def generate_launch_description():
         .robot_description(file_path=urdf_file, mappings={"ur_type": "ur5e", "name": "ur"})
         .robot_description_semantic(file_path="srdf/ur.srdf.xacro", mappings={"ur_type": "ur5e", "name": "ur"})
         .trajectory_execution(file_path="config/controllers.yaml") 
-        .planning_pipelines(pipelines=["ompl"]) 
+        .planning_pipelines(pipelines=["ompl", "chomp"]) 
         .to_moveit_configs()
     )
 
