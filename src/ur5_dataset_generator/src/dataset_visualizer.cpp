@@ -5,10 +5,8 @@
 #include <moveit_msgs/msg/planning_scene.hpp>
 #include <moveit_msgs/msg/display_robot_state.hpp>
 #include <yaml-cpp/yaml.h>
-#include <chrono>
-#include <thread>
-
-using namespace std::chrono_literals;
+#include <iostream>
+#include <string>
 
 int main(int argc, char** argv)
 {
@@ -25,7 +23,6 @@ int main(int argc, char** argv)
   }
   const moveit::core::JointModelGroup* jmg = robot_model->getJointModelGroup("ur_manipulator");
 
-  // Dodajemy QoS (Quality of Service), żeby RViz lepiej łapał nasze wiadomości
   auto qos = rclcpp::QoS(1).transient_local();
   auto scene_pub = node->create_publisher<moveit_msgs::msg::PlanningScene>("/planning_scene", qos);
   auto state_pub = node->create_publisher<moveit_msgs::msg::DisplayRobotState>("/display_robot_state", qos);
@@ -33,7 +30,7 @@ int main(int argc, char** argv)
   YAML::Node config;
   try {
     config = YAML::LoadFile("benchmark_queries.yaml");
-    RCLCPP_INFO(node->get_logger(), "Loaded benchmark_queries.yaml");
+    RCLCPP_INFO(node->get_logger(), "Loaded YAML configuration.");
   } catch (const YAML::Exception& e) {
     RCLCPP_ERROR(node->get_logger(), "Error reading YAML!");
     return 1;
@@ -42,6 +39,7 @@ int main(int argc, char** argv)
   moveit_msgs::msg::PlanningScene scene_msg;
   scene_msg.is_diff = true; 
 
+  // --- ŁADOWANIE PRZESZKÓD ---
   if (config["obstacles"]) {
     for (const auto& obs_node : config["obstacles"]) {
       moveit_msgs::msg::CollisionObject obj;
@@ -71,46 +69,94 @@ int main(int argc, char** argv)
     }
   }
 
-  RCLCPP_INFO(node->get_logger(), "Starting infinite loop. Press Ctrl+C in terminal to stop.");
+  // Publikujemy scenę pierwszy raz
+  scene_pub->publish(scene_msg);
 
-  // NIESKOŃCZONA PĘTLA - Program nie zniknie, dopóki go nie zamkniesz
+  YAML::Node queries = config["queries"];
+  int num_queries = queries ? queries.size() : 0;
+  
+  if (num_queries == 0) {
+    RCLCPP_WARN(node->get_logger(), "Nie znaleziono zapytań (queries) w pliku YAML!");
+    return 0;
+  }
+
+  // --- FUNKCJA POMOCNICZA DO PUBLIKOWANIA STANU ---
+  auto publish_state = [&](int index, bool is_start) {
+    if (index < 0 || index >= num_queries) return;
+    
+    auto query_item = queries[index];
+    std::string q_name = query_item.begin()->first.as<std::string>();
+    YAML::Node q_data = query_item.begin()->second;
+
+    auto joints = is_start ? q_data["start"].as<std::vector<double>>() : q_data["goal"].as<std::vector<double>>();
+
+    moveit::core::RobotState rs(robot_model);
+    rs.setJointGroupPositions(jmg, joints);
+    
+    moveit_msgs::msg::DisplayRobotState disp_msg;
+    moveit::core::robotStateToRobotStateMsg(rs, disp_msg.state);
+    state_pub->publish(disp_msg);
+    
+    std::string state_type = is_start ? "START" : "CEL (END)";
+    RCLCPP_INFO(node->get_logger(), "[%s] Wyświetlam: %s", q_name.c_str(), state_type.c_str());
+  };
+
+  // --- INTERFEJS TERMINALOWY ---
+  int current_index = 0;
+  std::cout << "\n====================================================\n";
+  std::cout << " Wczytano " << num_queries << " par zapytań (indeksy od 0 do " << num_queries - 1 << ").\n";
+  std::cout << " DOSTĘPNE KOMENDY:\n";
+  std::cout << "   start - pokazuje config początkowy dla obecnego indeksu\n";
+  std::cout << "   end   - pokazuje config docelowy dla obecnego indeksu\n";
+  std::cout << "   <nr>  - wpisz numer (np. 3), aby przeskoczyć do innej pary\n";
+  std::cout << "   q     - wyjście z programu\n";
+  std::cout << "====================================================\n";
+
+  // Na starcie pokazujemy pozycję startową zerowego zapytania
+  publish_state(current_index, true);
+
+  std::string input;
   while (rclcpp::ok()) 
   {
-    // Publikujemy przeszkody przy każdym obrocie, żeby RViz na pewno je widział
-    scene_pub->publish(scene_msg);
+    std::cout << "\n[Index: " << current_index << "] Komenda > " << std::flush;;
+    if (!std::getline(std::cin, input)) break; // Wychwytuje np. Ctrl+D
 
-    if (config["queries"]) {
-      for (const auto& query_item : config["queries"]) {
-        if (!rclcpp::ok()) break; // Przerywamy, jeśli wciśnięto Ctrl+C
+    // Czyszczenie wejścia (usunięcie zbędnych spacji jeśli ktoś wpisze " start")
+    input.erase(0, input.find_first_not_of(" \t\r\n"));
+    input.erase(input.find_last_not_of(" \t\r\n") + 1);
 
-        std::string q_name = query_item.begin()->first.as<std::string>();
-        YAML::Node q_data = query_item.begin()->second;
-
-        auto start_joints = q_data["start"].as<std::vector<double>>();
-        auto goal_joints = q_data["goal"].as<std::vector<double>>();
-
-        moveit::core::RobotState rs(robot_model);
-        moveit_msgs::msg::DisplayRobotState disp_msg;
-
-        // --- START ---
-        rs.setJointGroupPositions(jmg, start_joints);
-        moveit::core::robotStateToRobotStateMsg(rs, disp_msg.state);
-        state_pub->publish(disp_msg);
-        RCLCPP_INFO(node->get_logger(), "[%s] Showing START", q_name.c_str());
-        std::this_thread::sleep_for(3s);
-
-        if (!rclcpp::ok()) break;
-
-        // --- CEL ---
-        rs.setJointGroupPositions(jmg, goal_joints);
-        moveit::core::robotStateToRobotStateMsg(rs, disp_msg.state);
-        state_pub->publish(disp_msg);
-        RCLCPP_INFO(node->get_logger(), "[%s] Showing GOAL", q_name.c_str());
-        std::this_thread::sleep_for(4s);
+    if (input == "q" || input == "quit" || input == "exit") {
+      break;
+    } 
+    else if (input == "start") {
+      publish_state(current_index, true);
+      scene_pub->publish(scene_msg); // Upewniamy się, że klocki nie znikną w RVizie
+    } 
+    else if (input == "end") {
+      publish_state(current_index, false);
+      scene_pub->publish(scene_msg);
+    } 
+    else if (!input.empty()) {
+      // Próba parsowania liczby
+      try {
+        int new_index = std::stoi(input);
+        if (new_index >= 0 && new_index < num_queries) {
+          current_index = new_index;
+          // Automatycznie pokazujemy 'start' nowo wybranego zapytania
+          publish_state(current_index, true);
+          scene_pub->publish(scene_msg);
+        } else {
+          std::cout << " [!] Podano indeks poza zakresem (0 - " << num_queries - 1 << ").\n";
+        }
+      } catch (const std::invalid_argument&) {
+        std::cout << " [!] Nieznana komenda. Wpisz 'start', 'end', numer lub 'q'.\n";
+      } catch (const std::out_of_range&) {
+        std::cout << " [!] Podana liczba jest zbyt duża.\n";
       }
     }
   }
 
+  RCLCPP_INFO(node->get_logger(), "Zamykanie wizualizatora...");
   rclcpp::shutdown();
   return 0;
 }

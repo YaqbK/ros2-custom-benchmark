@@ -16,7 +16,7 @@ def load_yaml(package_name, file_path):
 def generate_launch_description():
     ur_type = "ur5"
 
-    # 1. Ręczna kompilacja URDF (Kuloodporna metoda)
+    # 1. kompilacja URDF
     robot_description_content = Command([
         FindExecutable(name="xacro"), " ",
         PathJoinSubstitution([FindPackageShare("ur_description"), "urdf", "ur.urdf.xacro"]), " ",
@@ -25,7 +25,7 @@ def generate_launch_description():
     ])
     robot_description = {"robot_description": ParameterValue(robot_description_content, value_type=str)}
 
-    # 2. Ręczna kompilacja SRDF
+    # 2. kompilacja SRDF
     robot_description_semantic_content = Command([
         FindExecutable(name="xacro"), " ",
         PathJoinSubstitution([FindPackageShare("ur_moveit_config"), "srdf", "ur.srdf.xacro"]), " ",
@@ -57,12 +57,14 @@ def generate_launch_description():
         ],
     )
 
-    # 5. Nasz węzeł C++ do pokazu slajdów
+    # 5. węzeł C++ do pokazu slajdów
     visualizer_node = Node(
         package='ur5_dataset_generator',
         executable='dataset_visualizer',
         name='dataset_visualizer',
         output='screen',
+        emulate_tty=True,
+        prefix=['gnome-terminal --'],
         parameters=[
             robot_description,
             robot_description_semantic,

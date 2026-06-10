@@ -26,7 +26,7 @@ public:
 class CustomBenchmarkExecutor : public moveit_ros_benchmarks::BenchmarkExecutor
 {
 private:
-  // NASZA SKRYTKA: Tu bezpiecznie schowamy zapytania z pliku YAML
+  // chowamy zapytania z pliku YAML
   std::vector<BenchmarkRequest> preloaded_queries_;
 
 protected:
@@ -39,7 +39,6 @@ protected:
       std::vector<TrajectoryConstraints>& /*traj_constraints*/,
       std::vector<BenchmarkRequest>& queries) override
   {
-    // KLUCZOWY MOMENT: MoveIt przed chwilą zrobił queries.clear(), więc my je z powrotem ładujemy ze skrytki!
     queries = preloaded_queries_;
     return true; 
   }
@@ -62,7 +61,7 @@ public:
       else node->set_parameter(rclcpp::Parameter(name, val));
     };
     
-    // Wymuszamy parametry dokładnie tak, jak szuka ich parser
+    // Wymuszamy parametry tak, jak szuka ich parser
     set_str_param("benchmark_config.parameters.query_regex", ".*");
     set_str_param("benchmark_config.parameters.start_state_regex", ".*");
     set_str_param("benchmark_config.parameters.goal_constraint_regex", ".*");
@@ -78,7 +77,7 @@ public:
 
     CustomBenchmarkOptions options(node);
 
-    // Ładowanie wszystkich trzech potoków planistycznych
+    // Ładowanie wszystkich planning pipelines
     auto ompl_pipeline = std::make_shared<planning_pipeline::PlanningPipeline>(robot_model, node, "ompl");
     this->planning_pipelines_["ompl"] = ompl_pipeline;
 
@@ -134,7 +133,7 @@ public:
     moveit_msgs::msg::PlanningScene scene_msg;
     scene.getPlanningSceneMsg(scene_msg);
 
-    // Czyszczenie naszej skrytki
+    // Czyszczenie skrytki
     preloaded_queries_.clear(); 
     const moveit::core::JointModelGroup* jmg = robot_model->getJointModelGroup("ur_manipulator");
 
