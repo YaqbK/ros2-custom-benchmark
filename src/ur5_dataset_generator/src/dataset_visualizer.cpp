@@ -29,7 +29,7 @@ int main(int argc, char** argv)
 
   YAML::Node config;
   try {
-    config = YAML::LoadFile("benchmark_queries.yaml");
+    config = YAML::LoadFile("benchmark_queries.yaml"); // DATASET KTÓRY CHCEMY WIZUALIZOWAĆ
     RCLCPP_INFO(node->get_logger(), "Loaded YAML configuration.");
   } catch (const YAML::Exception& e) {
     RCLCPP_ERROR(node->get_logger(), "Error reading YAML!");

@@ -88,6 +88,7 @@ def main():
                 "process_time": process_time,
                 "path_length": path_len
             })
+            # krzywizna ścieżki 
             
     print("================== KONIEC BENCHMARKU ==================\n")
     

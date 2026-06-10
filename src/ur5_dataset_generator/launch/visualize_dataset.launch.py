@@ -57,7 +57,7 @@ def generate_launch_description():
         ],
     )
 
-    # 5. węzeł C++ do pokazu slajdów
+    # 5. węzeł C++ do pokazu
     visualizer_node = Node(
         package='ur5_dataset_generator',
         executable='dataset_visualizer',

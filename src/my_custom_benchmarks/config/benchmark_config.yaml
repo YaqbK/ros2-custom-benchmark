@@ -34,15 +34,13 @@ custom_benchmark_node:
       planning_plugin: "ompl_interface/OMPLPlanner"
     chomp:
       planning_plugin: "chomp_interface/CHOMPPlanner"
-    stomp:
-      planning_plugin: "stomp_interface/StompPlanner"
       
     benchmark_config:
       parameters:
         name: "ur5e_planner_comparison"
-        runs: 5
+        runs: 2
         group: "ur_manipulator"
-        timeout: 10.0
+        timeout: 2.0
         output_directory: "/home/jakub/Ros/custom_benchmark_ws/results/"
         
         planners:
@@ -50,6 +48,8 @@ custom_benchmark_node:
             planners:
               - RRTConnectkConfigDefault
               - PRMkConfigDefault
+              - RRTstarkConfigDefault
+              - AnytimePathShortening
           - plugin: chomp
             planners:
               - CHOMP
