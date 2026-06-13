@@ -2,7 +2,8 @@ import os
 import yaml
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.substitutions import Command, FindExecutable, PathJoinSubstitution
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import Command, FindExecutable, PathJoinSubstitution, LaunchConfiguration
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
@@ -14,6 +15,13 @@ def load_yaml(package_name, file_path):
         return yaml.safe_load(file)
 
 def generate_launch_description():
+    # Deklaracja argumentu do terminala
+    dataset_file_arg = DeclareLaunchArgument(
+        'dataset_file',
+        default_value='',
+        description='Nazwa pliku YAML (np. failed_queries.yaml). Zostaw puste, by wczytac obstacles i queries.'
+    )
+
     ur_type = "ur5"
 
     # 1. kompilacja URDF
@@ -65,6 +73,7 @@ def generate_launch_description():
         output='screen',
         emulate_tty=True,
         prefix=['gnome-terminal --'],
+        arguments=[LaunchConfiguration('dataset_file')],  # Przekazanie argumentu do C++
         parameters=[
             robot_description,
             robot_description_semantic,
@@ -72,4 +81,8 @@ def generate_launch_description():
         ],
     )
 
-    return LaunchDescription([rviz_node, visualizer_node])
+    return LaunchDescription([
+        dataset_file_arg, 
+        rviz_node, 
+        visualizer_node
+    ])

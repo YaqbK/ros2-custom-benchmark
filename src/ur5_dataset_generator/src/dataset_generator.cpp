@@ -8,6 +8,7 @@
 #include <vector>
 #include <cstdlib>
 #include <ctime>
+#include <cmath>
 
 // Pomocnicza funkcja do losowania wartości z zakresu
 double randomDouble(double min, double max) {
@@ -30,14 +31,11 @@ int main(int argc, char** argv)
   // =====================================================================
   // --- KONFIGURACJA PARAMETRÓW SCENY ---
   // =====================================================================
-  int min_obstacles = 2;
-  int max_obstacles = 5;
-  int target_dataset_size = 10;
+  int min_obstacles = 5;
+  int max_obstacles = 8;
+  int target_dataset_size = 250;
 
-  // Przestrzeń robocza (obszar losowania przeszkód dookoła robota)
-  double ws_x_min = 0.2,  ws_x_max = 0.9;
-  double ws_y_min = -0.8, ws_y_max = 0.9;
-  double ws_z_min = 0.1,  ws_z_max = 0.9;
+  double ws_z_min = -0.8,  ws_z_max = 0.8;
 
   // Rozmiary brył (min i max dla promieni, wysokości i krawędzi)
   double size_min = 0.05, size_max = 0.25;
@@ -67,12 +65,20 @@ int main(int argc, char** argv)
         primitive.dimensions = {randomDouble(size_min, size_max / 1.5)}; // RADIUS
     }
 
+    // Promień: od 0.35m (bezpiecznie poza podstawą) do 0.85m (zasięg ramienia UR5e)
+    double r_min = 0.35;
+    double r_max = 0.85;
+    double r = randomDouble(r_min, r_max);
+    
+    // Pełne 360 stopni dookoła robota
+    double theta = randomDouble(0.0, 2.0 * M_PI); 
+
     geometry_msgs::msg::Pose pose;
-    pose.position.x = randomDouble(ws_x_min, ws_x_max);
-    pose.position.y = randomDouble(ws_y_min, ws_y_max);
+    pose.position.x = r * std::cos(theta);
+    pose.position.y = r * std::sin(theta);
     pose.position.z = randomDouble(ws_z_min, ws_z_max);
     pose.orientation.w = 1.0;
-
+    
     collision_object.primitives.push_back(primitive);
     collision_object.primitive_poses.push_back(pose);
     collision_object.operation = collision_object.ADD;
@@ -89,11 +95,6 @@ int main(int argc, char** argv)
 
   int valid_states_found = 0;
   std::vector<std::vector<double>> dataset;
-
-  // MARGINES BEZPIECZEŃSTWA (np. 2.5 centymetra), do dodania ewentualnie, sprawiało problemy bo jointy ramienia się stykają i wywala
-  // double safety_margin = 0.025; 
-
-  // RCLCPP_INFO(node->get_logger(), "Starting strict collision-free state generation with %f m padding...", safety_margin);
 
   while (valid_states_found < target_dataset_size * 2)
   {
@@ -115,8 +116,11 @@ int main(int argc, char** argv)
   }
 
   // Zapis do pliku YAML
-  std::ofstream file("benchmark_queries.yaml");
-  file << "obstacles:\n";
+  // =========================================================
+  // 1. Zapis samych przeszkód do pliku obstacles.yaml
+  // =========================================================
+  std::ofstream obs_file("obstacles.yaml");
+  obs_file << "obstacles:\n";
   for (const auto& obs : generated_obstacles) {
     std::string type_str;
     switch(obs.primitives[0].type) {
@@ -125,31 +129,37 @@ int main(int argc, char** argv)
         case shape_msgs::msg::SolidPrimitive::SPHERE: type_str = "SPHERE"; break;
     }
     
-    file << "  - id: " << obs.id << "\n";
-    file << "    type: " << type_str << "\n";
-    file << "    dimensions: [";
+    obs_file << "  - id: " << obs.id << "\n";
+    obs_file << "    type: " << type_str << "\n";
+    obs_file << "    dimensions: [";
     for (size_t k = 0; k < obs.primitives[0].dimensions.size(); ++k) {
-        file << obs.primitives[0].dimensions[k];
-        if (k < obs.primitives[0].dimensions.size() - 1) file << ", ";
+        obs_file << obs.primitives[0].dimensions[k];
+        if (k < obs.primitives[0].dimensions.size() - 1) obs_file << ", ";
     }
-    file << "]\n    position: [" 
-         << obs.primitive_poses[0].position.x << ", "
-         << obs.primitive_poses[0].position.y << ", "
-         << obs.primitive_poses[0].position.z << "]\n";
+    obs_file << "]\n    position: [" 
+             << obs.primitive_poses[0].position.x << ", "
+             << obs.primitive_poses[0].position.y << ", "
+             << obs.primitive_poses[0].position.z << "]\n";
   }
+  obs_file.close();
+  RCLCPP_INFO(node->get_logger(), "Saved obstacles to obstacles.yaml");
 
-  file << "queries:\n";
+  // =========================================================
+  // 2. Zapis samych zapytań (start/goal) do pliku queries.yaml
+  // =========================================================
+  std::ofstream queries_file("queries.yaml");
+  queries_file << "queries:\n";
   for (size_t i = 0; i < dataset.size(); i += 2) {
-      file << "  - query_" << (i / 2 + 1) << ":\n";
-      file << "      start: [";
-      for (size_t j = 0; j < dataset[i].size(); ++j) file << dataset[i][j] << (j == dataset[i].size()-1 ? "" : ", ");
-      file << "]\n      goal: [";
-      for (size_t j = 0; j < dataset[i+1].size(); ++j) file << dataset[i+1][j] << (j == dataset[i+1].size()-1 ? "" : ", ");
-      file << "]\n";
+      queries_file << "  - query_" << (i / 2 + 1) << ":\n";
+      queries_file << "      start: [";
+      for (size_t j = 0; j < dataset[i].size(); ++j) queries_file << dataset[i][j] << (j == dataset[i].size()-1 ? "" : ", ");
+      queries_file << "]\n      goal: [";
+      for (size_t j = 0; j < dataset[i+1].size(); ++j) queries_file << dataset[i+1][j] << (j == dataset[i+1].size()-1 ? "" : ", ");
+      queries_file << "]\n";
   }
-  file.close();
+  queries_file.close();
+  RCLCPP_INFO(node->get_logger(), "Saved queries to queries.yaml");
 
-  RCLCPP_INFO(node->get_logger(), "Saved advanced dataset to benchmark_queries.yaml");
   rclcpp::shutdown();
   return 0;
 }

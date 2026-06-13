@@ -38,9 +38,9 @@ custom_benchmark_node:
     benchmark_config:
       parameters:
         name: "ur5e_planner_comparison"
-        runs: 2
+        runs: 3
         group: "ur_manipulator"
-        timeout: 2.0
+        timeout: 10.0
         output_directory: "/home/jakub/Ros/custom_benchmark_ws/results/"
         
         planners:

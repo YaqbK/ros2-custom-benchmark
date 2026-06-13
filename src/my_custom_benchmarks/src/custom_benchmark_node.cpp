@@ -40,12 +40,12 @@ private:
 
 protected:
   bool loadBenchmarkQueryData(
-      const moveit_ros_benchmarks::BenchmarkOptions& /*options*/,
-      moveit_msgs::msg::PlanningScene& /*scene_msg*/,
-      std::vector<StartState>& /*start_states*/,
-      std::vector<PathConstraints>& /*path_constraints*/,
-      std::vector<PathConstraints>& /*goal_constraints*/,
-      std::vector<TrajectoryConstraints>& /*traj_constraints*/,
+      const moveit_ros_benchmarks::BenchmarkOptions&,
+      moveit_msgs::msg::PlanningScene&,
+      std::vector<StartState>&,
+      std::vector<PathConstraints>&,
+      std::vector<PathConstraints>&,
+      std::vector<TrajectoryConstraints>&,
       std::vector<BenchmarkRequest>& queries) override
   {
     queries = preloaded_queries_;
@@ -75,8 +75,7 @@ public:
     set_str_param("benchmark_config.parameters.path_constraint_regex", ".*");
     set_str_param("benchmark_config.parameters.trajectory_constraint_regex", ".*");
 
-    // Wymuszenie ładowania trzech stabilnych potoków
-    std::vector<std::string> target_pipelines = {"ompl", "chomp", "pilz_industrial_motion_planner"};
+    std::vector<std::string> target_pipelines = {"ompl", "chomp"};
     if (!node->has_parameter("benchmark_config.planning_pipelines.pipelines")) {
       node->declare_parameter("benchmark_config.planning_pipelines.pipelines", target_pipelines);
     } else {
@@ -91,22 +90,20 @@ public:
     auto chomp_pipeline = std::make_shared<planning_pipeline::PlanningPipeline>(robot_model, node, "chomp");
     this->planning_pipelines_["chomp"] = chomp_pipeline;
 
-    auto pilz_pipeline = std::make_shared<planning_pipeline::PlanningPipeline>(robot_model, node, "pilz_industrial_motion_planner");
-    this->planning_pipelines_["pilz_industrial_motion_planner"] = pilz_pipeline;
-
     auto scene = std::make_shared<planning_scene::PlanningScene>(robot_model);
     
-    YAML::Node config;
+    YAML::Node obstacles_config, queries_config;
     try {
-      config = YAML::LoadFile("benchmark_queries.yaml");
-      RCLCPP_INFO(node->get_logger(), "Successfully loaded benchmark_queries.yaml");
+      obstacles_config = YAML::LoadFile("obstacles.yaml");
+      queries_config = YAML::LoadFile("queries.yaml");
+      RCLCPP_INFO(node->get_logger(), "Successfully loaded obstacles.yaml and queries.yaml");
     } catch (const YAML::Exception& e) {
-      RCLCPP_ERROR(node->get_logger(), "Failed to load benchmark_queries.yaml!");
+      RCLCPP_ERROR(node->get_logger(), "Failed to load YAML files!");
       return;
     }
 
-    if (config["obstacles"]) {
-      for (const auto& obs_node : config["obstacles"]) {
+    if (obstacles_config["obstacles"]) {
+      for (const auto& obs_node : obstacles_config["obstacles"]) {
         moveit_msgs::msg::CollisionObject obj;
         obj.id = obs_node["id"].as<std::string>();
         obj.header.frame_id = robot_model->getModelFrame();
@@ -136,7 +133,6 @@ public:
         obj.operation = obj.ADD;
         scene->processCollisionObjectMsg(obj);
       }
-      RCLCPP_INFO(node->get_logger(), "Loaded %ld multi-type obstacles.", config["obstacles"].size());
     }
 
     moveit_msgs::msg::PlanningScene scene_msg;
@@ -148,8 +144,8 @@ public:
     double yaml_timeout = 10.0;
     node->get_parameter_or("benchmark_config.parameters.timeout", yaml_timeout, 10.0);
 
-    if (config["queries"]) {
-      for (const auto& query_item : config["queries"]) {
+    if (queries_config["queries"]) {
+      for (const auto& query_item : queries_config["queries"]) {
         for (auto it = query_item.begin(); it != query_item.end(); ++it) {
           std::string q_name = it->first.as<std::string>();
           YAML::Node q_data = it->second;
@@ -183,18 +179,17 @@ public:
           preloaded_queries_.push_back(benchmark_query);
         }
       }
-      RCLCPP_INFO(node->get_logger(), "Loaded %ld queries to preloaded cache.", preloaded_queries_.size());
     }
 
-    RCLCPP_INFO(node->get_logger(), "[*] Rozpoczynam analize i budowanie macierzy bledow dla plannerow...");
+    RCLCPP_INFO(node->get_logger(), "Rozpoczynam analize i budowanie macierzy bledow dla plannerow...");
     
     std::map<std::string, planning_pipeline::PlanningPipelinePtr> local_pipelines;
     local_pipelines["ompl"] = ompl_pipeline;
     local_pipelines["chomp"] = chomp_pipeline;
-    local_pipelines["pilz_industrial_motion_planner"] = pilz_pipeline;
 
     std::vector<YAML::Node> failed_queries_list;
     bool system_has_failures = false;
+    int current_failed_id = 0;
 
     for (const auto& query : preloaded_queries_) {
       bool current_query_failed_somewhere = false;
@@ -226,34 +221,35 @@ public:
       if (current_query_failed_somewhere) {
         system_has_failures = true;
         YAML::Node failed_node;
-        YAML::Node failed_data;
 
-        for (const auto& orig_query : config["queries"]) {
+        failed_node["failed_id"] = current_failed_id++;
+        failed_node["original_id"] = query.name;
+
+        for (const auto& orig_query : queries_config["queries"]) {
           if (orig_query[query.name]) {
-            failed_data["start"] = orig_query[query.name]["start"];
-            failed_data["goal"] = orig_query[query.name]["goal"];
+            failed_node["start"] = orig_query[query.name]["start"];
+            failed_node["goal"] = orig_query[query.name]["goal"];
             break;
           }
         }
-        failed_data["planners_status"] = planners_status_node;
-        failed_node[query.name] = failed_data;
+        failed_node["planners_status"] = planners_status_node;
         failed_queries_list.push_back(failed_node);
       }
     }
 
     if (system_has_failures) {
       YAML::Node failed_yaml_root;
-      if (config["obstacles"]) {
-        failed_yaml_root["obstacles"] = config["obstacles"];
+      if (obstacles_config["obstacles"]) {
+        failed_yaml_root["obstacles"] = obstacles_config["obstacles"];
       }
       failed_yaml_root["queries"] = failed_queries_list;
 
       std::ofstream failed_file("failed_queries.yaml");
       failed_file << failed_yaml_root;
       failed_file.close();
-      RCLCPP_WARN(node->get_logger(), "[!] Znaleziono bledy! Macierz porazek zapisana do pliku: failed_queries.yaml");
+      RCLCPP_WARN(node->get_logger(), "Znaleziono bledy! Macierz porazek zapisana do pliku: failed_queries.yaml");
     } else {
-      RCLCPP_INFO(node->get_logger(), "[+] Wszystkie plannery poradzily sobie idealnie ze wszystkimi zadaniami.");
+      RCLCPP_INFO(node->get_logger(), "Wszystkie plannery poradzily sobie idealnie ze wszystkimi zadaniami.");
     }
 
     std::vector<BenchmarkRequest> dummy_queries;

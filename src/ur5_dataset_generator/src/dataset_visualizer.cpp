@@ -7,6 +7,7 @@
 #include <yaml-cpp/yaml.h>
 #include <iostream>
 #include <string>
+#include <fstream>
 
 int main(int argc, char** argv)
 {
@@ -27,21 +28,49 @@ int main(int argc, char** argv)
   auto scene_pub = node->create_publisher<moveit_msgs::msg::PlanningScene>("/planning_scene", qos);
   auto state_pub = node->create_publisher<moveit_msgs::msg::DisplayRobotState>("/display_robot_state", qos);
 
-  YAML::Node config;
+  YAML::Node obstacles_node;
+  YAML::Node queries_node;
+  bool loaded_successfully = false;
+
+  // Domyślnie brak pliku docelowego - wymusza to ładowanie obstacles/queries
+  std::string target_file = ""; 
+  if (argc > 1 && std::string(argv[1]).find(".yaml") != std::string::npos) {
+    target_file = argv[1];
+  }
+
   try {
-    config = YAML::LoadFile("benchmark_queries.yaml"); // DATASET KTÓRY CHCEMY WIZUALIZOWAĆ
-    RCLCPP_INFO(node->get_logger(), "Loaded YAML configuration.");
+    // Próbuje ładować pojedynczy plik TYLKO gdy został podany jako argument
+    if (!target_file.empty()) {
+      std::ifstream f(target_file.c_str());
+      if (f.good()) {
+        YAML::Node single_file = YAML::LoadFile(target_file);
+        if (single_file["queries"]) {
+          queries_node = single_file["queries"];
+          if (single_file["obstacles"]) obstacles_node = single_file["obstacles"];
+          loaded_successfully = true;
+          RCLCPP_INFO(node->get_logger(), "Wczytano dane z pliku: %s", target_file.c_str());
+        }
+      }
+    }
+
+    // Jeśli nie podano argumentu lub plik z argumentu był błędny, ładujemy standard
+    if (!loaded_successfully) {
+      YAML::Node obs_file = YAML::LoadFile("obstacles.yaml");
+      YAML::Node q_file = YAML::LoadFile("queries.yaml");
+      obstacles_node = obs_file["obstacles"];
+      queries_node = q_file["queries"];
+      RCLCPP_INFO(node->get_logger(), "Wczytano domyślne pliki obstacles.yaml oraz queries.yaml.");
+    }
   } catch (const YAML::Exception& e) {
-    RCLCPP_ERROR(node->get_logger(), "Error reading YAML!");
+    RCLCPP_ERROR(node->get_logger(), "Błąd wczytywania plików YAML! Upewnij się, że pliki istnieją w katalogu domyślnym.");
     return 1;
   }
 
   moveit_msgs::msg::PlanningScene scene_msg;
   scene_msg.is_diff = true; 
 
-  // --- ŁADOWANIE PRZESZKÓD ---
-  if (config["obstacles"]) {
-    for (const auto& obs_node : config["obstacles"]) {
+  if (obstacles_node) {
+    for (const auto& obs_node : obstacles_node) {
       moveit_msgs::msg::CollisionObject obj;
       obj.id = obs_node["id"].as<std::string>();
       obj.header.frame_id = robot_model->getModelFrame();
@@ -69,26 +98,29 @@ int main(int argc, char** argv)
     }
   }
 
-  // Publikujemy scenę pierwszy raz
   scene_pub->publish(scene_msg);
 
-  YAML::Node queries = config["queries"];
-  int num_queries = queries ? queries.size() : 0;
-  
+  int num_queries = queries_node ? queries_node.size() : 0;
   if (num_queries == 0) {
-    RCLCPP_WARN(node->get_logger(), "Nie znaleziono zapytań (queries) w pliku YAML!");
+    RCLCPP_WARN(node->get_logger(), "Nie znaleziono zapytań (queries)!");
     return 0;
   }
 
-  // --- FUNKCJA POMOCNICZA DO PUBLIKOWANIA STANU ---
   auto publish_state = [&](int index, bool is_start) {
     if (index < 0 || index >= num_queries) return;
     
-    auto query_item = queries[index];
-    std::string q_name = query_item.begin()->first.as<std::string>();
-    YAML::Node q_data = query_item.begin()->second;
+    auto query_item = queries_node[index];
+    std::string q_name;
+    std::vector<double> joints;
 
-    auto joints = is_start ? q_data["start"].as<std::vector<double>>() : q_data["goal"].as<std::vector<double>>();
+    if (query_item["failed_id"]) {
+      q_name = query_item["original_id"].as<std::string>() + " (Failed ID: " + query_item["failed_id"].as<std::string>() + ")";
+      joints = is_start ? query_item["start"].as<std::vector<double>>() : query_item["goal"].as<std::vector<double>>();
+    } else {
+      q_name = query_item.begin()->first.as<std::string>();
+      YAML::Node q_data = query_item.begin()->second;
+      joints = is_start ? q_data["start"].as<std::vector<double>>() : q_data["goal"].as<std::vector<double>>();
+    }
 
     moveit::core::RobotState rs(robot_model);
     rs.setJointGroupPositions(jmg, joints);
@@ -101,7 +133,6 @@ int main(int argc, char** argv)
     RCLCPP_INFO(node->get_logger(), "[%s] Wyświetlam: %s", q_name.c_str(), state_type.c_str());
   };
 
-  // --- INTERFEJS TERMINALOWY ---
   int current_index = 0;
   std::cout << "\n====================================================\n";
   std::cout << " Wczytano " << num_queries << " par zapytań (indeksy od 0 do " << num_queries - 1 << ").\n";
@@ -112,16 +143,14 @@ int main(int argc, char** argv)
   std::cout << "   q     - wyjście z programu\n";
   std::cout << "====================================================\n";
 
-  // Na starcie pokazujemy pozycję startową zerowego zapytania
   publish_state(current_index, true);
 
   std::string input;
   while (rclcpp::ok()) 
   {
-    std::cout << "\n[Index: " << current_index << "] Komenda > " << std::flush;;
-    if (!std::getline(std::cin, input)) break; // Wychwytuje np. Ctrl+D
+    std::cout << "\n[Index: " << current_index << "] Komenda > " << std::flush;
+    if (!std::getline(std::cin, input)) break;
 
-    // Czyszczenie wejścia (usunięcie zbędnych spacji jeśli ktoś wpisze " start")
     input.erase(0, input.find_first_not_of(" \t\r\n"));
     input.erase(input.find_last_not_of(" \t\r\n") + 1);
 
@@ -130,19 +159,17 @@ int main(int argc, char** argv)
     } 
     else if (input == "start") {
       publish_state(current_index, true);
-      scene_pub->publish(scene_msg); // Upewniamy się, że klocki nie znikną w RVizie
+      scene_pub->publish(scene_msg); 
     } 
     else if (input == "end") {
       publish_state(current_index, false);
       scene_pub->publish(scene_msg);
     } 
     else if (!input.empty()) {
-      // Próba parsowania liczby
       try {
         int new_index = std::stoi(input);
         if (new_index >= 0 && new_index < num_queries) {
           current_index = new_index;
-          // Automatycznie pokazujemy 'start' nowo wybranego zapytania
           publish_state(current_index, true);
           scene_pub->publish(scene_msg);
         } else {
