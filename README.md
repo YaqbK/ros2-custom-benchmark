@@ -21,6 +21,7 @@ A unified, automated pipeline for generating, verifying, and benchmarking motion
 
 Clone this repository into the `src` directory of your ROS 2 workspace, resolve dependencies, and build using `colcon`.
 
+```bash
 # Source ROS 2 installation
 source /opt/ros/humble/setup.bash
 
@@ -30,3 +31,44 @@ colcon build
 
 # Source the local setup
 source install/setup.bash
+```
+
+## 🖥️ Usage
+1. Environment Generation
+Generate a random scene with obstacles and a set of planning queries.
+
+```bash
+ros2 launch ur5_dataset_generator dataset.launch.py
+```
+
+2. Dataset Verification
+Visually verify the randomized obstacle density and robot configurations in RViz to ensure they are physically sensible.
+
+```
+ros2 launch ur5_dataset_generator visualize_dataset.launch.py
+```
+
+3. Benchmark Execution
+Launch the main custom benchmarking node. This will iteratively test all configured planning pipelines against the generated queries.
+
+```
+ros2 launch my_custom_benchmarks run_benchmark.launch.py
+```
+
+4. Data Processing
+Convert the raw MoveIt log files into an SQLite database for statistical analysis (e.g., via Planner Arena).
+
+```
+ros2 run moveit_ros_benchmarks moveit_benchmark_statistics.py [path_of_log_file] [path_of_saved_db_file]
+```
+
+## 🔮 Future Work
+* Refinement of the random generator to prevent complete workspace blockage.
+* Parameter tuning for highly constrained 6D C-Space bottlenecks.
+* Full compilation and hardware verification of the GPU-accelerated cuRobo planning interface.
+
+## 👨‍💻 Author
+
+Jakub Krusicki
+  
+Automatic Control and Robotics, Poznań University of Technology.
