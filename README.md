@@ -1,28 +1,33 @@
-# UR5e MoveIt 2 Benchmark (ROS 2 Humble)
+# ROS 2 Custom Benchmarking Environment for UR5e
 
-This repository contains a custom benchmarking infrastructure for motion planning on the Universal Robots UR5e, specifically developed for ROS 2 Humble.
+A unified, automated pipeline for generating, verifying, and benchmarking motion planning algorithms for the UR5e manipulator. Built with ROS 2 Humble and MoveIt 2, this project provides a standardized framework to compare sampling-based planners (OMPL) against gradient-based trajectory optimization techniques (CHOMP) under identical environmental constraints.
 
-## Overview
-The standard MoveIt 2 benchmarking tutorials and scripts often encounter critical parameter-type mismatches in the Humble distribution (e.g., conflicts between `string` and `string_array` for planner names). 
+## 🚀 Features
 
-This project solves these issues by implementing a **custom C++ Benchmark Executor** that:
-- Bypasses the broken YAML parameter parser.
-- Manually injects planning pipelines and algorithms into memory.
-- Overrides the `BenchmarkExecutor` class to handle database-less queries.
+* **Unified C++ API:** A standardized execution wrapper that bridges the gap between fragmented planner interfaces (OMPL, CHOMP).
+* **Automated Dataset Generation:** Randomly instantiates geometric obstacles (boxes, cylinders, spheres) and mathematically samples valid, collision-free start and goal joint configurations.
+* **Interactive Dataset Visualizer:** A custom command-line interface (CLI) node linked to RViz for manual, deterministic inspection of generated query pairs before running heavy benchmarks.
+* **Data Separation:** Clean separation of physical environments (`obstacles.yaml`) and joint configurations (`queries.yaml`) to ensure repeatable testing.
+* **cuRobo Ready:** Modular architecture including prepared Python boilerplate for future GPU-accelerated planner integration (NVIDIA cuRobo).
 
-## Features
-- **Robot:** UR5e (using standard `ur_moveit_config`).
-- **Planners:** RRTConnect, PRM, and RRTstar.
-- **Environment:** Customizable C++ planning scene (ready for obstacle integration).
-- **Output:** Generates standard MoveIt benchmark log files for statistical analysis.
+## 🛠️ Prerequisites
 
-## Prerequisites
-- ROS 2 Humble
-- MoveIt 2
-- [Universal_Robots_ROS2_Driver](https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver)
+* **OS:** Ubuntu 22.04
+* **Middleware:** ROS 2 Humble
+* **Framework:** MoveIt 2
+* **Dependencies:** `moveit_ros_benchmarks`, Flexible Collision Library (FCL)
 
-## Installation & Usage
-1. Clone to your workspace `src` folder.
-2. Build the package:
-   colcon build --packages-select my_custom_benchmarks
-   source install/setup.bash
+## 📦 Installation & Build
+
+Clone this repository into the `src` directory of your ROS 2 workspace, resolve dependencies, and build using `colcon`.
+
+```bash
+# Source ROS 2 installation
+source /opt/ros/humble/setup.bash
+
+# Navigate to your workspace root (e.g., ~/custom_benchmark_ws)
+# Build the workspace
+colcon build
+
+# Source the local setup
+source install/setup.bash
