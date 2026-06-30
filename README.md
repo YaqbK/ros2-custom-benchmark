@@ -21,7 +21,6 @@ A unified, automated pipeline for generating, verifying, and benchmarking motion
 
 Clone this repository into the `src` directory of your ROS 2 workspace, resolve dependencies, and build using `colcon`.
 
-```bash
 # Source ROS 2 installation
 source /opt/ros/humble/setup.bash
 
